@@ -27,4 +27,23 @@ function M.send(pane_id, text, opts, exec)
   return true
 end
 
+-- The command that moves the window's focus to an agent's pane: the app's
+-- `pane.focus` on the agent's terminal, the TUI's `herdr agent focus`.
+local function focus_argv(pane_id)
+  if exec_mod.is_app() then
+    return { vim.env.HERDR_APP_BIN or "herdr-app", "do", "pane.focus", "--terminal", pane_id }, "herdr-app do pane.focus"
+  end
+  return { "herdr", "agent", "focus", pane_id }, "herdr agent focus"
+end
+
+function M.focus(pane_id, exec)
+  exec = exec or exec_mod.default_exec
+  local argv, name = focus_argv(pane_id)
+  local r = exec(argv)
+  if r.code ~= 0 then
+    return false, name .. " failed: " .. (r.stderr ~= "" and r.stderr or ("exit " .. r.code))
+  end
+  return true
+end
+
 return M

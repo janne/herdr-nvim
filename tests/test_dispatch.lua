@@ -69,3 +69,25 @@ T.test("dispatch (app): a failed send names the app command", function()
     T.ok(err:match("app%-send") and err:match("boom"))
   end)
 end)
+
+T.test("dispatch: focus uses herdr agent focus", function()
+  local calls, exec = recorder()
+  T.ok(dispatch.focus("wA:p1", exec))
+  T.eq(calls[1], { "herdr", "agent", "focus", "wA:p1" })
+end)
+
+T.test("dispatch (app): focus asks the app to focus the agent's terminal", function()
+  as_app(function()
+    local app_bin = vim.env.HERDR_APP_BIN
+    vim.env.HERDR_APP_BIN = "/opt/bin/herdr-app"
+    local calls, exec = recorder()
+    local ok = dispatch.focus("t5", exec)
+    vim.env.HERDR_APP_BIN = app_bin
+    T.ok(ok)
+    T.eq(calls[1], { "/opt/bin/herdr-app", "do", "pane.focus", "--terminal", "t5" })
+    local _, failing = recorder(1)
+    local fok, err = dispatch.focus("t5", failing)
+    T.eq(fok, false)
+    T.ok(err:match("pane%.focus") and err:match("boom"))
+  end)
+end)
