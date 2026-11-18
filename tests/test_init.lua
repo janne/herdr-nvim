@@ -285,19 +285,31 @@ T.test("init: ref_range sends a bare citation, never submits, keeps comments", f
   local ui = require("herdr-nvim.ui")
   local dispatch = require("herdr-nvim.dispatch")
   local agents = require("herdr-nvim.agents")
-  local sent = {}
-  local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
+  local sent, focused = {}, {}
+  local o1, o2, o3, o4 = ui.pick_agent, dispatch.send, agents.list, dispatch.focus
   ui.pick_agent = function() error("picker must not open for a lone agent") end
   dispatch.send = function(pane, text, opts) sent = { pane, text, opts }; return true end
+  dispatch.focus = function(pane) table.insert(focused, pane); return true end
   agents.list = function() return { { pane_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
 
   hn.ref_range(2, 3)
-  ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
 
   T.eq(sent[1], "wZ:p9")
   T.eq(sent[2], "lua/hn-ref.lua:2-3 ", "payload is the citation alone")
   T.eq(sent[3].submit, false, "a ref must never submit")
   T.eq(#comments.list(), 1, "referencing must not clear pending comments")
+  T.eq(focused, { "wZ:p9" }, "the agent's pane takes the focus after a ref")
+
+  -- focus_after_ref = false leaves the focus in nvim; a failed send moves nothing.
+  hn.config.focus_after_ref = false
+  focused = {}
+  hn.ref_range(2, 2)
+  T.eq(focused, {}, "focus_after_ref = false must not move the focus")
+  hn.config.focus_after_ref = true
+  dispatch.send = function() return false, "boom" end
+  hn.ref_range(2, 2)
+  T.eq(focused, {}, "a failed send must not move the focus")
+  ui.pick_agent, dispatch.send, agents.list, dispatch.focus = o1, o2, o3, o4
 end)
 
 T.test("init: ref_range shortens against the picked agent's cwd, not the buffer's", function()
@@ -316,6 +328,7 @@ T.test("init: ref_range shortens against the picked agent's cwd, not the buffer'
   -- Two agents → the picker runs, so the cwd is only known after resolution.
   ui.pick_agent = function(l, cb) cb(l[2]) end
   dispatch.send = function(_, text) sent = { text }; return true end
+  local of = dispatch.focus; dispatch.focus = function() return true end
   agents.list = function()
     return {
       { pane_id = "wA:p1", tab_id = "wA:t1", title = "pi", status = "idle", cwd = "/repo" },
@@ -325,6 +338,7 @@ T.test("init: ref_range shortens against the picked agent's cwd, not the buffer'
 
   hn.ref_range(1, 1)
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
+  dispatch.focus = of
   vim.env.HERDR_TAB_ID = previous
 
   T.eq(sent[1], "x.lua:1 ", "path is relative to the agent that was picked")
@@ -346,11 +360,13 @@ T.test("init: ref_range warns on an unsaved buffer but still sends", function()
   local o1, o2, o3, on = ui.pick_agent, dispatch.send, agents.list, vim.notify
   ui.pick_agent = function() end
   dispatch.send = function(_, text) sent = { text }; return true end
+  local of = dispatch.focus; dispatch.focus = function() return true end
   agents.list = function() return { { pane_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
   vim.notify = function(msg, level) if level == vim.log.levels.WARN then table.insert(warns, msg) end end
 
   hn.ref_range(1, 1)
   ui.pick_agent, dispatch.send, agents.list, vim.notify = o1, o2, o3, on
+  dispatch.focus = of
 
   T.eq(#warns, 1, "unsaved buffer warns exactly once")
   T.ok(warns[1]:find("unsaved changes", 1, true))
@@ -389,6 +405,7 @@ T.test("init: ref_line and ref_selection resolve their own span", function()
   local o1, o2, o3 = ui.pick_agent, dispatch.send, agents.list
   ui.pick_agent = function() end
   dispatch.send = function(_, text) sent[#sent + 1] = text; return true end
+  local of = dispatch.focus; dispatch.focus = function() return true end
   agents.list = function() return { { pane_id = "wZ:p9", title = "pi", status = "idle", cwd = "/repo" } } end
 
   hn.ref_line()
@@ -396,6 +413,7 @@ T.test("init: ref_line and ref_selection resolve their own span", function()
   vim.api.nvim_buf_set_mark(b, ">", 4, 0, {})
   hn.ref_selection()
   ui.pick_agent, dispatch.send, agents.list = o1, o2, o3
+  dispatch.focus = of
 
   T.eq(sent[1], "span.lua:3 ", "ref_line targets the cursor line")
   T.eq(sent[2], "span.lua:2-4 ", "ref_selection targets the visual marks")

@@ -138,7 +138,7 @@ module.exports = { executablePath: "/Applications/Google Chrome.app/Contents/Mac
 | `<leader>al` | `:Herdr list` | list comments: `⏎` edit, `d` delete |
 | `<leader>as` | `:Herdr send` | paste all comments into the agent's input |
 | `<leader>aS` | `:Herdr submit` | send all comments to the agent |
-| `<leader>ai` | `:Herdr ref` | `path:line` at the agent's cursor |
+| `<leader>ai` | `:Herdr ref` | `path:line` at the agent's cursor, then focus the agent |
 
 They go to the tab's agent (or the space's only one); otherwise nvim asks
 which. Comments are in memory only, follow your edits, and are cleared after

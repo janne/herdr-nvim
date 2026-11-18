@@ -5,7 +5,7 @@ local agents = require("herdr-nvim.agents")
 local dispatch = require("herdr-nvim.dispatch")
 local ui = require("herdr-nvim.ui")
 
-M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true }
+M.config = { prefix = "<leader>a", keymaps = true, clear_after_send = true, focus_after_ref = true }
 
 -- Callback of each default keymap this plugin set, by mode and keys. setup()
 -- can run more than once (the sidebar daemon calls it again after the user's
@@ -179,7 +179,8 @@ end
 -- Range primitive behind ref_line(), ref_selection(), and :Herdr ref. Sends a
 -- bare `path:line` citation and nothing else -- no comment, no code, no header,
 -- and never a submit -- so it lands in the middle of a message you are still
--- typing. Pending comments are untouched.
+-- typing. Pending comments are untouched. Then the agent's pane takes the
+-- focus (`focus_after_ref`), so you can finish that message.
 function M.ref_range(start_line, end_line)
   local bufnr = vim.api.nvim_get_current_buf()
   local file = vim.api.nvim_buf_get_name(bufnr)
@@ -190,8 +191,12 @@ function M.ref_range(start_line, end_line)
   local item = { file = file, start_line = start_line, end_line = end_line }
   deliver_to_agent(function(agent)
     return prompt.format_ref(item, { cwd = agent.cwd })
-  end, { submit = false }, function(_, payload)
+  end, { submit = false }, function(agent, payload)
     vim.notify("herdr-nvim: referenced " .. vim.trim(payload))
+    if M.config.focus_after_ref then
+      local ok, ferr = dispatch.focus(agent.pane_id)
+      if not ok then vim.notify("herdr-nvim: " .. ferr, vim.log.levels.WARN) end
+    end
     -- A reference points at the file on disk, so unwritten changes are
     -- invisible to whoever opens it. Worth saying out loud; not worth blocking
     -- over. Only after a send, so a cancelled picker stays silent.
