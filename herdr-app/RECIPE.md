@@ -138,6 +138,13 @@ The tree's keys (LazyVim's Snacks explorer defaults; `?` lists them):
   behind the preview, unsaved edits and all. Opening any file in nvim brings nvim back. The preview
   reloads when its file is saved. Files closes a preview with the tree and
   brings it back next time. An image opened any way opens its preview.
+- **Page** (`document.js`): YAML front matter is a bordered key/value
+  table (keys bold, as wide as it needs); headings (ATX and setext) are laid
+  out by the preview at GitHub's scale (2, 1.5, 1.25, 1, 0.875, 0.85 em of the
+  terminals' font size, weight 600, a `border` rule under h1 and h2); `---`
+  rules are 1px `border` lines; the rest stays one TextView per stretch of
+  markdown. On macOS the page is in `.SystemUIFont`: Herdr's UI font (Geist)
+  has no bold or italic installed.
 - **Mermaid**: each diagram is drawn once per code and theme, so editing
   the text around it, or reloading, draws nothing again; a save keeps the
   diagrams on screen. A theme switch draws the other theme's, and switching

@@ -13,10 +13,11 @@
 // and of the rest the newest CACHE_KEEP.
 
 import { div, image } from "gpui-kit";
-import { v_flex, TextView } from "gpui-base";
-import { appHome, exec, panes, settings, setShared, shared, theme } from "herdr";
+import { h_flex, v_flex, TextView } from "gpui-base";
+import { appHome, exec, panes, settings, setShared, shared, theme, window } from "herdr";
 import * as fs from "fs/promises";
 import { changesIn } from "./lib.js";
+import { HEADING, documentBlocks, frontMatter, linkDefinitions } from "./document.js";
 import { drawMermaid, modeOf, pngSize, splitMermaid } from "./mermaid.js";
 import { bin, canonical, dirname, same } from "./path.js";
 
@@ -29,6 +30,10 @@ const CACHE = "mods/herdr-nvim/.cache";
 const CACHE_KEEP = 40;
 // Markdown's padding left and right.
 const PAD_X = 18;
+// The page's font on macOS: the system font, as VS Code's and GitHub's
+// previews use (-apple-system). Herdr's UI font (Geist) has no bold or italic
+// installed, so **bold** and *italic* would read as plain text.
+const MAC_FONT = ".SystemUIFont";
 // shared(): which file each tab's preview shows, for its pane header.
 const SHOWN = "herdr-nvim.previews";
 // shared(): the cache's files, {recent: names newest first, shown: {tab: names}}.
@@ -161,17 +166,74 @@ async function load(file) {
     return { error: "The file is gone." };
   }
   if (data.length > MAX_BYTES[kind]) return { error: `Too big to preview (${(data.length / 1048576).toFixed(1)} MB).` };
-  if (kind === "markdown") {
-    const parts = splitMermaid(data);
-    if (!parts.some((p) => p.mermaid !== undefined)) return { kind, text: data };
-    return { kind, parts: parts.map((p) => (p.mermaid === undefined ? p : { ...p, names: diagramNames(p.mermaid) })) };
-  }
+  if (kind === "markdown") return { kind, parts: pageOf(data) };
   const ext = /\.([^./]+)$/.exec(file)[1].toLowerCase();
   return { kind, name: await cached(data, ext) };
 }
 
+// A markdown text as the preview lays it out (document.js): its front matter
+// ({front: fields}), then its headings, rules, diagrams (a diagram's part
+// carries its pictures' names) and the markdown between them, in order.
+export function pageOf(text) {
+  const front = frontMatter(text);
+  const body = front ? front.body : text;
+  const definitions = linkDefinitions(body);
+  const parts = front ? [{ front: front.fields }] : [];
+  for (const p of splitMermaid(body)) {
+    if (p.mermaid !== undefined) parts.push({ ...p, names: diagramNames(p.mermaid) });
+    else parts.push(...documentBlocks(p.md, definitions));
+  }
+  return parts;
+}
+
 // Markdown as the preview renders it: every TextView of it is made here.
 const markdown = (id, text) => TextView.markdown(id, text).selectable(true);
+
+// Markdown inside a heading that plain text would show as written.
+const INLINE = /[`*_[\]<>\\&]/;
+
+// A heading at GitHub's scale of the body text (document.js HEADING), its
+// text as markdown so code and links in it stay; a rule under h1 and h2.
+function heading(h, i, t) {
+  const style = HEADING[h.level];
+  const size = textSize() * style.em;
+  return div()
+    .w_full()
+    .flex_none()
+    .mt(i === 0 ? 0 : Math.round(size * 0.9))
+    .mb(Math.round(textSize() * 0.6))
+    .text_size(size)
+    .font_weight(600)
+    .when(Boolean(style.dim), (el) => el.text_color(t.dim))
+    .when(Boolean(style.rule), (el) => el.pb(Math.round(size * 0.3)).border_b(1).border_color(t.border))
+    // Plain text keeps a heading's own line height when it wraps; one with
+    // code, a link or emphasis in it goes through the TextView.
+    .child(INLINE.test(h.text) ? markdown(`herdr-nvim-preview-h-${i}`, `**${h.text}**`) : div().line_height(1.25).child(h.text));
+}
+
+// Front matter as VS Code shows it: a bordered key/value table, keys bold,
+// as wide as it needs up to the pane's width.
+function frontTable(fields, t, room) {
+  const size = textSize();
+  const longest = Math.max(...fields.map(([k]) => k.length));
+  const keyWidth = Math.min(Math.ceil(longest * size * 0.55) + 26, room ? Math.round(room * 0.4) : 240);
+  return v_flex()
+    .self_start()
+    .max_w_full()
+    .flex_none()
+    .mb(16)
+    .border(1)
+    .border_color(t.border)
+    .children(
+      fields.map(([key, value], i) =>
+        h_flex()
+          .items_start()
+          .when(i > 0, (el) => el.border_t(1).border_color(t.border))
+          .child(div().w(keyWidth).flex_none().px(13).py(7).font_weight(600).child(key))
+          .child(div().min_w(0).px(13).py(7).border_l(1).border_color(t.border).child(value)),
+      ),
+    );
+}
 
 export class Preview {
   constructor(props, cx) {
@@ -243,8 +305,9 @@ export class Preview {
     return (s?.parts ?? []).flatMap((p) => (p.names ? [p.names.dark, p.names.light] : []));
   }
 
-  // Markdown with mermaid blocks: the text between them as markdown, each
-  // diagram as its picture, at most the pane's width, all in one scroll.
+  // The page: front matter as a table, headings and rules drawn here, each
+  // diagram as its picture at most the pane's width, the markdown between them
+  // as markdown, all in one scroll.
   parts(s, t) {
     const room = this.width ? Math.max(40, this.width - 2 * PAD_X) : null;
     const diagramOf = (p, i) => {
@@ -274,7 +337,15 @@ export class Preview {
           cx.notify();
         }
       })
-      .children(s.parts.map((p, i) => (p.names ? diagramOf(p, i) : markdown(`herdr-nvim-preview-${i}`, p.md))));
+      .children(
+        s.parts.map((p, i) =>
+          p.front ? frontTable(p.front, t, room)
+          : p.heading ? heading(p.heading, i, t)
+          : p.rule ? div().my(20).h(1).w_full().flex_none().bg(t.border)
+          : p.names ? diagramOf(p, i)
+          : markdown(`herdr-nvim-preview-${i}`, p.md),
+        ),
+      );
   }
 
   render() {
@@ -291,14 +362,13 @@ export class Preview {
         ? div().m_auto().text_color(t.dim).child(s.error)
         : s.kind === "image"
           ? div().flex_1().min_h(0).w_full().p(14).child(image(`${CACHE}/${s.name}`).size_full())
-          : s.parts
-            ? this.parts(s, t)
-            : markdown("herdr-nvim-preview", s.text).scrollable(true).flex_1().min_h(0).px(PAD_X).py(12);
+          : this.parts(s, t);
     return v_flex()
       .id("herdr-nvim-preview")
       .size_full()
       .bg(t.background)
       .text_size(textSize())
+      .when(window()?.platform === "macos", (el) => el.font_family(MAC_FONT))
       .text_color(t.foreground)
       .child(body);
   }
