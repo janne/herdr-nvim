@@ -181,7 +181,7 @@ tab-complete):
 | `<leader>al` | `:Herdr list` | list comments (float): hover to jump, `⏎` edit, `d` delete |
 | `<leader>as` | `:Herdr send` | paste all comments into the agent's input |
 | `<leader>aS` | `:Herdr submit` | send all comments to the agent (auto-submits) |
-| `<leader>ai` | `:Herdr ref` | reference the current line / selection at the agent's cursor (also takes a range: `:5,10Herdr ref`) |
+| `<leader>ai` | `:Herdr ref` | reference the current line / selection at the agent's cursor, then focus the agent (also takes a range: `:5,10Herdr ref`; `focus_after_ref = false` stays in nvim) |
 
 Keymaps are on by default (prefix `<leader>a`) and never override a map you
 already set. To bind your own, set `keymaps = false` and map the command:
