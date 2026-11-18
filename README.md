@@ -122,8 +122,10 @@ whole repo (what `git ls-files` reports, `.gitignore` honored), served by
 ## Preview
 
 On nvim's pane header, **Preview** appears while nvim's file is markdown, an
-image or an SVG. The preview takes nvim's exact place: markdown rendered, an
-image fitted. **Source** (**nvim** for an image) swaps nvim back, unsaved
+image or an SVG. The preview takes nvim's exact place: markdown rendered the
+way VS Code and GitHub show it (front matter as a table, headings at their
+scale with rules under the first two, the system font on macOS so bold and
+italic show), an image fitted. **Source** (**nvim** for an image) swaps nvim back, unsaved
 edits and all. The preview reloads when its file is saved, and an image
 opened any way opens its preview.
 
