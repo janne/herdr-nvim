@@ -250,4 +250,25 @@ assert.deepEqual(ran.args.slice(2), ["-o", `${tmp}/a.png`, "-t", "default", "-b"
 assert.deepEqual((await import("node:fs")).readdirSync(tmp), [], "the input file was left behind");
 await (await import("node:fs/promises")).rm(tmp, { recursive: true });
 
+// The preview's page (document.js): front matter as fields, headings (ATX and
+// setext) and rules as blocks of their own, nothing inside a code block taken
+// for one, and link definitions given to every markdown block.
+const { frontMatter, documentBlocks, linkDefinitions } = await import("../mods/herdr-nvim/document.js");
+assert.deepEqual(frontMatter('---\ntitle: "feat: X"\ndate: 2026-11-18\ntags:\n  - a\n  - b\n# note\n---\n# Body'),
+  { fields: [["title", "feat: X"], ["date", "2026-11-18"], ["tags", "a, b"]], body: "# Body" });
+assert.equal(frontMatter("# No front matter\n---\n"), null);
+assert.equal(frontMatter("---\nunclosed: yes\n"), null);
+assert.deepEqual(documentBlocks("# One #\ntext\n\nTwo\n---\n- item\n---\n```md\n# not a heading\n---\n```\n***"), [
+  { heading: { level: 1, text: "One" } },
+  { md: "text\n" },
+  { heading: { level: 2, text: "Two" } },
+  { md: "- item" },
+  { rule: true },
+  { md: "```md\n# not a heading\n---\n```" },
+  { rule: true },
+]);
+assert.deepEqual(documentBlocks("Title\n===\nbody", ["[a]: http://a"]),
+  [{ heading: { level: 1, text: "Title" } }, { md: "body\n\n[a]: http://a" }]);
+assert.deepEqual(linkDefinitions("[a]: http://a\n```\n[b]: http://b\n```\n[^n]: note"), ["[a]: http://a"]);
+
 console.log("js checks: ok");

@@ -11,10 +11,84 @@
 // markdown are drawn there too, when mermaid-cli is installed (mermaid.js).
 
 import { div, image } from "gpui-kit";
-import { v_flex, TextView } from "gpui-base";
-import { appHome, exec, panes, setShared, shared, theme, watchFolder } from "herdr";
+import { h_flex, v_flex, TextView } from "gpui-base";
+import { appHome, exec, panes, settings, setShared, shared, theme, watchFolder, window } from "herdr";
 import * as fs from "fs/promises";
-import { drawMermaid, hasMermaid, hashText, isDark, pngSize, splitMermaid } from "./mermaid.js";
+import { HEADING, documentBlocks, frontMatter, linkDefinitions } from "./document.js";
+import { drawMermaid, hashText, isDark, pngSize, splitMermaid } from "./mermaid.js";
+
+// Markdown's padding left and right.
+const PAD_X = 18;
+// The page's font on macOS: the system font, as VS Code's and GitHub's
+// previews use (-apple-system). Herdr's UI font (Geist) has no bold or italic
+// installed, so **bold** and *italic* would read as plain text.
+const MAC_FONT = ".SystemUIFont";
+
+// The preview's text size: the terminals' font size, else Herdr's 14.
+function textSize() {
+  const size = settings().font_size;
+  return typeof size === "number" ? size : 14;
+}
+
+// A markdown text as the preview lays it out (document.js): its front matter
+// ({front: fields}), then its headings, rules, diagrams and the markdown
+// between them, in order.
+export function pageOf(text) {
+  const front = frontMatter(text);
+  const body = front ? front.body : text;
+  const definitions = linkDefinitions(body);
+  const parts = front ? [{ front: front.fields }] : [];
+  for (const p of splitMermaid(body)) {
+    if (p.mermaid !== undefined) parts.push(p);
+    else parts.push(...documentBlocks(p.md, definitions));
+  }
+  return parts;
+}
+
+const markdown = (id, text) => TextView.markdown(id, text).selectable(true);
+
+// Markdown inside a heading that plain text would show as written.
+const INLINE = /[`*_[\]<>\\&]/;
+
+// A heading at GitHub's scale of the body text (document.js HEADING); a rule
+// under h1 and h2.
+function heading(h, i, t) {
+  const style = HEADING[h.level];
+  const size = textSize() * style.em;
+  return div()
+    .w_full()
+    .flex_none()
+    .mt(i === 0 ? 0 : Math.round(size * 0.9))
+    .mb(Math.round(textSize() * 0.6))
+    .text_size(size)
+    .font_weight(600)
+    .when(Boolean(style.dim), (el) => el.text_color(t.dim))
+    .when(Boolean(style.rule), (el) => el.pb(Math.round(size * 0.3)).border_b(1).border_color(t.border))
+    .child(INLINE.test(h.text) ? markdown(`herdr-nvim-preview-h-${i}`, `**${h.text}**`) : div().line_height(1.25).child(h.text));
+}
+
+// Front matter as VS Code shows it: a bordered key/value table, keys bold.
+function frontTable(fields, t, room) {
+  const size = textSize();
+  const longest = Math.max(...fields.map(([k]) => k.length));
+  const keyWidth = Math.min(Math.ceil(longest * size * 0.55) + 26, room ? Math.round(room * 0.4) : 240);
+  return v_flex()
+    .self_start()
+    .max_w_full()
+    .flex_none()
+    .mb(16)
+    .border(1)
+    .border_color(t.border)
+    .children(
+      fields.map(([key, value], i) =>
+        h_flex()
+          .items_start()
+          .when(i > 0, (el) => el.border_t(1).border_color(t.border))
+          .child(div().w(keyWidth).flex_none().px(13).py(7).font_weight(600).child(key))
+          .child(div().min_w(0).px(13).py(7).border_l(1).border_color(t.border).child(value)),
+      ),
+    );
+}
 
 const KINDS = {
   md: "markdown", markdown: "markdown", mdx: "markdown",
@@ -55,7 +129,10 @@ async function cached(bytes, ext) {
 // names, so none on screen). Its path for image().
 async function remember(name) {
   const dir = `${appHome()}/${CACHE}`;
-  const keep = [name, ...((shared("herdr-nvim.preview-cache") ?? []).filter((n) => n !== name))];
+  // A list here; newer herdr-nvim keeps {recent, shown} under the same name.
+  const was = shared("herdr-nvim.preview-cache");
+  const listed = Array.isArray(was) ? was : Array.isArray(was?.recent) ? was.recent : [];
+  const keep = [name, ...listed.filter((n) => n !== name)];
   for (const old of keep.slice(CACHE_KEEP)) await fs.unlink(`${dir}/${old}`).catch(() => {});
   setShared("herdr-nvim.preview-cache", keep.slice(0, CACHE_KEEP));
   return `${CACHE}/${name}`;
@@ -118,8 +195,7 @@ async function load(file) {
   }
   if (data.length > MAX_BYTES[kind]) return { error: `Too big to preview (${(data.length / 1048576).toFixed(1)} MB).` };
   if (kind === "markdown") {
-    const parts = splitMermaid(data);
-    return hasMermaid(parts) ? { kind, text: data, parts } : { kind, text: data };
+    return { kind, parts: pageOf(data) };
   }
   const ext = /\.([^./]+)$/.exec(file)[1].toLowerCase();
   return { kind, src: await cached(data, ext) };
@@ -192,7 +268,15 @@ export class Preview {
           cx.notify();
         }
       })
-      .children(s.parts.map((p, i) => (p.mermaid === undefined ? TextView.markdown(`herdr-nvim-preview-${i}`, p.md).selectable(true) : diagramOf(p))));
+      .children(
+        s.parts.map((p, i) =>
+          p.front ? frontTable(p.front, t, room)
+          : p.heading ? heading(p.heading, i, t)
+          : p.rule ? div().my(20).h(1).w_full().flex_none().bg(t.border)
+          : p.mermaid !== undefined ? diagramOf(p)
+          : markdown(`herdr-nvim-preview-${i}`, p.md),
+        ),
+      );
   }
 
   render() {
@@ -204,14 +288,13 @@ export class Preview {
         ? div().m_auto().text_color(t.dim).child(s.error)
         : s.kind === "image"
           ? div().flex_1().min_h(0).w_full().p(14).child(image(s.src).size_full())
-          : s.parts
-            ? this.parts(s, t)
-            : TextView.markdown("herdr-nvim-preview", s.text).selectable(true).scrollable(true).flex_1().min_h(0).px(18).py(12);
+          : this.parts(s, t);
     return v_flex()
       .id("herdr-nvim-preview")
       .size_full()
       .bg(t.background)
-      .text_size(13)
+      .text_size(textSize())
+      .when(window()?.platform === "macos", (el) => el.font_family(MAC_FONT))
       .text_color(t.foreground)
       .child(body);
   }
